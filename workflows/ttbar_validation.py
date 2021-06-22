@@ -3,7 +3,8 @@ from coffea import hist, processor
 import numpy as np
 #import awkward1 as ak
 import awkward as ak
-
+from coffea.analysis_tools import Weights, PackedSelection
+from coffea.lumi_tools import LumiMask
 
 class NanoProcessor(processor.ProcessorABC):
     # Define histograms
@@ -105,6 +106,10 @@ class NanoProcessor(processor.ProcessorABC):
         output = self.accumulator.identity()
 
         dataset = events.metadata['dataset']
+        isRealData = not hasattr(events, "genWeight")
+
+	selection = PackedSelection()
+        weights = Weights(len(events))
         output['sumw'][dataset] += ak.sum(events.genWeight)
         
         ##############
@@ -119,74 +124,98 @@ class NanoProcessor(processor.ProcessorABC):
         for t in trig_arrs:
             req_trig = req_trig | t
 
+	selection.add("trigger",trigger)
+
+
         ############
         # Event level
         
         ## Muon cuts
         # muon twiki: https://twiki.cern.ch/twiki/bin/view/CMS/SWGuideMuonIdRun2
-        events.Muon = events.Muon[(events.Muon.pt > 30) & (abs(events.Muon.eta < 2.4))] # & (events.Muon.tightId > .5)
-        events.Muon = ak.pad_none(events.Muon, 1, axis=1) 
-        req_muon =(ak.count(events.Muon.pt, axis=1) == 1)
-        
+        goodmuon = ( (events.Muon.pt > 30) & (abs(events.Muon.eta < 2.4)) ) # & (events.Muon.tightId > .5)
+        #events.Muon = ak.pad_none(events.Muon, 1, axis=1) 
+        #req_muon =(ak.count(events.Muon.pt, axis=1) == 1)
+        nmuons = ak.sum(goodmuon,axis=1)
+
         ## Electron cuts
         # electron twiki: https://twiki.cern.ch/twiki/bin/viewauth/CMS/CutBasedElectronIdentificationRun2
-        events.Electron = events.Electron[(events.Electron.pt > 30) & (abs(events.Electron.eta) < 2.4)]
-        events.Electron = ak.pad_none(events.Electron, 1, axis=1) 
-        req_ele = (ak.count(events.Electron.pt, axis=1) == 1)
+        nelectrons = ak.sum ( (events.Electron.pt > 30) & (abs(events.Electron.eta) < 2.4), axis = 1 )
+        #events.Electron = ak.pad_none(events.Electron, 1, axis=1) 
+        #req_ele = (ak.count(events.Electron.pt, axis=1) == 1)
         
+
+	selection.add('onelep',(nmuons==1) & (nelectrons==1))
+
         ## Jet cuts
-        events.Jet = events.Jet[(events.Jet.pt > 25) & (abs(events.Jet.eta) <= 2.5)]
-        req_jets = (ak.count(events.Jet.pt, axis=1) >= 2)    
+	njets = selection.add("jets", ak.sum((events.Jet.pt > 25) & (abs(events.Jet.eta) <= 2.4) & 
+	((events.Jet.puId > 6 & (events.Jet.pt < 50)) | (events.Jet.pt > 50)) & events.Jet.jetId >= 2 & events.Jet.isTight ), axis=1)
+       # req_jets = (ak.count(events.Jet.pt, axis=1) >= 2)    
+
+	selection.add('njets', (njets>=2)) 
+
+	events.Jet = events.Jet[(events.Jet.pt > 25) & (abs(events.Jet.eta) <= 2.4) & ((events.Jet.puId > 6 & (events.Jet.pt < 50)) | (events.Jet.pt > 50)) & events.Jet.jetId >= 2 & events.Jet.isTight ]
         
-        req_opposite_charge = events.Electron[:, 0].charge * events.Muon[:, 0].charge == -1
+	
+	selection.add("opposite_charge", ak.pad_none( (events.Electron,2)[:, 0].charge * (events.Muon,2)[:, 0].charge == -1), axis = 1 )
+        #req_opposite_charge = events.Electron[:, 0].charge * events.Muon[:, 0].charge == -1
+       	selection.add("opposite_charge_ee", ak.pad_none( (events.Electron,2)[:, 0].charge * (events.Electron,2)[:, 0].charge == -1), axis = 1 )
+	selection.add("opposite_charge_mm", ak.pad_none( (events.Muon,2)[:, 0].charge * (events.Muon,2)[:, 0].charge == -1), axis = 1 )
+ 
+        #event_level = req_trig & req_muon & req_ele & req_opposite_charge & req_jets
         
-        event_level = req_trig & req_muon & req_ele & req_opposite_charge & req_jets
-        
+	 
         # Selected
-        selev = events[event_level]    
-        
+        #selev = events[event_level]    
+
         #########
         
         # Per electron
-        el_eta   = (abs(selev.Electron.eta) <= 2.4)
-        el_pt    = selev.Electron.pt > 30
-        el_level = el_eta & el_pt
+        #el_eta   = (abs(selev.Electron.eta) <= 2.4)
+        #el_pt    = selev.Electron.pt > 30
+        #el_level = el_eta & el_pt
+	
         
         # Per muon
-        mu_eta   = (abs(selev.Muon.eta) <= 2.4)
-        mu_pt    = selev.Muon.pt > 30
-        mu_level = mu_eta & mu_pt
+        #mu_eta   = (abs(selev.Muon.eta) <= 2.4)
+        #mu_pt    = selev.Muon.pt > 30
+        #mu_level = mu_eta & mu_pt
         
         # Per jet
-        jet_eta    = (abs(selev.Jet.eta) <= 2.4)
-        jet_pt     = selev.Jet.pt > 25
-        jet_pu     = ( ((selev.Jet.puId > 6) & (selev.Jet.pt < 50)) | (selev.Jet.pt > 50) ) 
-        jet_id     = selev.Jet.jetId >= 2 
-        #jet_id     = selev.Jet.isTight() == 1 & selev.Jet.isTightLeptonVeto() == 0
-        jet_level  = jet_pu & jet_eta & jet_pt & jet_id
+        #jet_eta    = (abs(selev.Jet.eta) <= 2.4)
+        #jet_pt     = selev.Jet.pt > 25
+        #jet_pu     = ( ((selev.Jet.puId > 6) & (selev.Jet.pt < 50)) | (selev.Jet.pt > 50) ) 
+        #jet_id     = selev.Jet.jetId >= 2 
+        #jet_tight     = selev.Jet.isTight # & not(selev.Jet.isTightLeptonVeto())
+        #jet_level  = jet_pu & jet_eta & jet_pt & jet_id & jet_tight
 
         # b-tag twiki : https://twiki.cern.ch/twiki/bin/viewauth/CMS/BtagRecommendation102X
-        bjet_disc_t  = selev.Jet.btagDeepB > 0.7264 # L=0.0494, M=0.2770, T=0.7264
-        bjet_disc_m  = selev.Jet.btagDeepB > 0.2770 # L=0.0494, M=0.2770, T=0.7264
-        bjet_disc_l  = selev.Jet.btagDeepB > 0.0494 # L=0.0494, M=0.2770, T=0.7264
-        bjet_level_t = jet_level & bjet_disc_t
-        bjet_level_m = jet_level & bjet_disc_m
-        bjet_level_l = jet_level & bjet_disc_l
+        selection.add("bjet_disc_t", ak.max(events.Jet.btagDeepB, axis=1, mask_identity=False) > 0.7264) # L=0.0494, M=0.2770, T=0.7264
+        selection.add("bjet_disc_m", ak.max(events.Jet.btagDeepB, axis=1, mask_identity=False) > 0.2770) # L=0.0494, M=0.2770, T=0.7264
+        selection.add("bjet_disc_l", ak.max(events.Jet.btagDeepB, axis=1, mask_identity=False) > 0.0494) # L=0.0494, M=0.2770, T=0.7264
+        #"bjet_level_t" = jet_level & bjet_disc_t
+        #"bjet_level_m" = jet_level & bjet_disc_m
+        #"bjet_level_l" = jet_level & bjet_disc_l
         
-        sel    = selev.Electron[el_level]
-        smu    = selev.Muon[mu_level]
-        sjets  = selev.Jet[jet_level]
-        sbjets_t = selev.Jet[bjet_level_t]
-        sbjets_m = selev.Jet[bjet_level_m]
-        sbjets_l = selev.Jet[bjet_level_l]
+        #sel    = selev.Electron[el_level]
+        #smu    = selev.Muon[mu_level]
+        #sjets  = selev.Jet[jet_level]
+        #sbjets_t = selev.Jet[bjet_level_t]
+        #sbjets_m = selev.Jet[bjet_level_m]
+        #sbjets_l = selev.Jet[bjet_level_l]
+
+        if not isRealData: weights.add('genweight', events.genWeight)
         
+	regions = {
+		'default': ['trigger', 'onelep', 'oppositecharge', 'njets', 'jets']
+
+	}
         # output['pt'].fill(dataset=dataset, pt=selev.Jet.pt.flatten())
         # Fill histograms dynamically  
         for histname, h in output.items():
             if (histname not in self.jet_hists) and (histname not in self.deepcsv_hists): continue
             # Get valid fields perhistogram to fill
             fields = {k: ak.flatten(sjets[k], axis=None) for k in h.fields if k in dir(sjets)}
-            h.fill(dataset=dataset, **fields)
+            h.fill(dataset=dataset, weight=weights.weight(), **fields)
 
 
         def flatten(ar): # flatten awkward into a 1d array to hist
@@ -195,19 +224,51 @@ class NanoProcessor(processor.ProcessorABC):
         def num(ar):
             return ak.num(ak.fill_none(ar[~ak.is_none(ar)], 0), axis=0)
 
-        output['njet'].fill(dataset=dataset,  njet=flatten(ak.num(sjets)))
-        output['nbjet_t'].fill(dataset=dataset, nbjet_t=flatten(ak.num(sbjets_t)))
-        output['nbjet_m'].fill(dataset=dataset, nbjet_m=flatten(ak.num(sbjets_m)))
-        output['nbjet_l'].fill(dataset=dataset, nbjet_l=flatten(ak.num(sbjets_l)))
-        output['nel'].fill(dataset=dataset,   nel=flatten(ak.num(sel)))
-        output['nmu'].fill(dataset=dataset,   nmu=flatten(ak.num(smu)))
+	for region, cuts in regions.items():
 
-        output['lelpt'].fill(dataset=dataset, lelpt=flatten(selev.Electron[:, 0].pt))
-        output['lmupt'].fill(dataset=dataset, lmupt=flatten(selev.Muon[:, 0].pt))
-        output['ljpt'].fill(dataset=dataset,  ljpt=flatten(selev.Jet[:, 0].pt))
-        output['sljpt'].fill(dataset=dataset,  sljpt=flatten(selev.Jet[:, 1].pt))
+		allcuts = set([])
+		cut = selection.all(*allcuts)
+
+	        output['njet'].fill(dataset=dataset, region=region, cut=0, weight=weights.weight()[cut], njet=normalize(ak.num(sjets),cut))
+	        #output['nbjet_t'].fill(dataset=dataset, weight=weights.weight(), nbjet_t=flatten(ak.num(sbjets_t)))
+	        #output['nbjet_m'].fill(dataset=dataset, weight=weights.weight(), nbjet_m=flatten(ak.num(sbjets_m)))
+	        #output['nbjet_l'].fill(dataset=dataset, weight=weights.weight(), nbjet_l=flatten(ak.num(sbjets_l)))
+	        output['nel'].fill(dataset=dataset, region=region,  cut=0, weight=weights.weight()[cut], nel=normalize(ak.num(sel),cut))
+	        output['nmu'].fill(dataset=dataset,   region=region,  cut=0, weight=weights.weight()[cut], nmu=normalize(ak.num(smu),cut))
+	
+	        output['lelpt'].fill(dataset=dataset, region=region,  cut=0, weight=weights.weight()[cut], lelpt=normalize(selev.Electron[:, 0].pt,cut))
+	        output['lmupt'].fill(dataset=dataset, region=region,  cut=0, weight=weights.weight()[cut], lmupt=normalize(selev.Muon[:, 0].pt,cut))
+	        output['ljpt'].fill(dataset=dataset,  region=region,  cut=0, weight=weights.weight()[cut], ljpt=normalize(selev.Jet[:, 0].pt,cut))
+	        output['sljpt'].fill(dataset=dataset, region=region,   cut=0, weight=weights.weight()[cut], sljpt=normalize(selev.Jet[:, 1].pt,cut))
+
+		for i, cut in eumerate(cuts):
+		allcuts.add(cut)
+		cut = selection.all(*allcuts)
+		
+			output['njet'].fill(dataset=dataset, region=region, cut = i+1, weight=weights.weight()[cut], njet=normalize(ak.num(sjets),cut))
+	        	output['nel'].fill(dataset=dataset, region=region,  cut=i+1, weight=weights.weight()[cut], nel=normalize(ak.num(sel),cut))
+	        	output['nmu'].fill(dataset=dataset,   region=region,  cut=i+1, weight=weights.weight()[cut], nmu=normalize(ak.num(smu),cut))
+	
+	        	output['lelpt'].fill(dataset=dataset, region=region,  cut=i+1, weight=weights.weight()[cut], lelpt=normalize(selev.Electron[:, 0].pt,cut))
+	        	output['lmupt'].fill(dataset=dataset, region=region,  cut=i+1, weight=weights.weight()[cut], lmupt=normalize(selev.Muon[:, 0].pt,cut))
+	        	output['ljpt'].fill(dataset=dataset,  region=region,  cut=i+1, weight=weights.weight()[cut], ljpt=normalize(selev.Jet[:, 0].pt,cut))
+	        	output['sljpt'].fill(dataset=dataset, region=region,   cut=i+1, weight=weights.weight()[cut], sljpt=normalize(selev.Jet[:, 1].pt,cut))
 
         return output
+
+	def fill(region):
+		selections = regions[region]
+		cut = selection.all(*selections)
+		weight = weights.weight()[cut]
+
+#    def build_lumimask(filename):
+#        from coffea.lumi_tools import LumiMask
+#	with importlib.resources.path("BTVNanoCommissioning.data", filename) as path:
+#	return LumiMask(path)
+
+#    lumiMasks = {
+#	'2016': build_lumimask('Cert_271036-284044_13TeV_23Sep2016ReReco_Collisions16_JSON.txt'), 
+#        }
 
     def postprocess(self, accumulator):
         return accumulator
