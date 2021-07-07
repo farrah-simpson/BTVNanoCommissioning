@@ -110,7 +110,7 @@ class NanoProcessor(processor.ProcessorABC):
         
         selection = PackedSelection()
         weights = Weights(len(events))
-        output['sumw'][dataset] += ak.sum(events.genWeight)
+        if not isRealData: output['sumw'][dataset] += ak.sum(events.genWeight)
         
         ##############
         # Trigger level
@@ -146,7 +146,11 @@ class NanoProcessor(processor.ProcessorABC):
         #req_ele = (ak.count(events.Electron.pt, axis=1) == 1)
         
         
-        selection.add('onelep',(nmuons==1) & (nelectrons==1))
+        selection.add('onelep',((nmuons==1) & (nelectrons==0))| ((nmuons==0) & (nelectrons==1)))
+        selection.add('dilep_emu',((nmuons==1) & (nelectrons==1)))  
+        selection.add('dilep_ee',((nmuons==0) & (nelectrons==2)))   
+        selection.add('dilep_mumu',((nmuons==2) & (nelectrons==0))) 
+
         
         ## Jet cuts
         #njets = selection.add("jets", ak.sum((events.Jet.pt > 25) & (abs(events.Jet.eta) <= 2.4) & 
@@ -211,11 +215,15 @@ class NanoProcessor(processor.ProcessorABC):
         	'default': ['trigger', 'onelep', 'oppositecharge', 'req_jets']
         
         }
-        # output['pt'].fill(dataset=dataset, pt=selev.Jet.pt.flatten())
+        #output['pt'].fill(dataset=dataset, pt=selev.Jet.pt.flatten())
         # Fill histograms dynamically  
+        #allcuts = set([])
+        #cut = selection.all(*allcuts)
+        
         for histname, h in output.items():
             if (histname not in self.jet_hists) and (histname not in self.deepcsv_hists): continue
             # Get valid fields perhistogram to fill
+ 
             fields = {k: ak.flatten(events.Jet[k], axis=None) for k in h.fields if k in dir(events.Jet)}
             h.fill(dataset=dataset, weight=weights.weight(), **fields)
         
@@ -231,30 +239,37 @@ class NanoProcessor(processor.ProcessorABC):
             allcuts = set([])
             cut = selection.all(*allcuts)
         
-            output['njet'].fill(dataset=dataset, region=region, cut=0, weight=weights.weight()[cut], njet=normalize(ak.num(events.Jet),cut))
+            for histname, h in output.items():
+                if (histname not in self.jet_hists) and (histname not in self.deepcsv_hists): continue
+                # Get valid fields perhistogram to fill
+ 
+                fields = {k: ak.flatten(events.Jet[k], axis=None) for k in h.fields if k in dir(events.Jet)}
+                h.fill(dataset=dataset, region=region, cut=cut, weight=weights.weight()[cut], **fields)
+ 
+            output['njet'].fill(dataset=dataset, region=region, cut=cut, weight=weights.weight()[cut], njet=normalize(ak.num(events.Jet),cut))
             #output['nbjet_t'].fill(dataset=dataset, weight=weights.weight(), nbjet_t=flatten(ak.num(sbjets_t)))
             #output['nbjet_m'].fill(dataset=dataset, weight=weights.weight(), nbjet_m=flatten(ak.num(sbjets_m)))
             #output['nbjet_l'].fill(dataset=dataset, weight=weights.weight(), nbjet_l=flatten(ak.num(sbjets_l)))
-            output['nel'].fill(dataset=dataset, region=region,  cut=0, weight=weights.weight()[cut], nel=normalize(ak.num(events.Electron),cut))
-            output['nmu'].fill(dataset=dataset,   region=region,  cut=0, weight=weights.weight()[cut], nmu=normalize(ak.num(events.Muon),cut))
+            output['nel'].fill(dataset=dataset, region=region,  cut=cut, weight=weights.weight()[cut], nel=normalize(ak.num(events.Electron),cut))
+            output['nmu'].fill(dataset=dataset,   region=region,  cut=cut, weight=weights.weight()[cut], nmu=normalize(ak.num(events.Muon),cut))
         
-            output['lelpt'].fill(dataset=dataset, region=region,  cut=0, weight=weights.weight()[cut], lelpt=normalize(events.Electron[:, 0].pt,cut))
-            output['lmupt'].fill(dataset=dataset, region=region,  cut=0, weight=weights.weight()[cut], lmupt=normalize(events.Muon[:, 0].pt,cut))
-            output['ljpt'].fill(dataset=dataset,  region=region,  cut=0, weight=weights.weight()[cut], ljpt=normalize(events.Jet[:, 0].pt,cut))
-            output['sljpt'].fill(dataset=dataset, region=region,   cut=0, weight=weights.weight()[cut], sljpt=normalize(events.Jet[:, 1].pt,cut))
+            output['lelpt'].fill(dataset=dataset, region=region,  cut=cut, weight=weights.weight()[cut], lelpt=normalize(events.Electron[:, 0].pt,cut))
+            output['lmupt'].fill(dataset=dataset, region=region,  cut=cut, weight=weights.weight()[cut], lmupt=normalize(events.Muon[:, 0].pt,cut))
+            output['ljpt'].fill(dataset=dataset,  region=region,  cut=cut, weight=weights.weight()[cut], ljpt=normalize(events.Jet[:, 0].pt,cut))
+            output['sljpt'].fill(dataset=dataset, region=region,   cut=cut, weight=weights.weight()[cut], sljpt=normalize(events.Jet[:, 1].pt,cut))
         
-            for i, cut in eumerate(cuts):
-                allcuts.add(cut)
-                cut = selection.all(*allcuts)
+            #for i, cut in eumerate(cuts):
+            #    allcuts.add(cut)
+            #    cut = selection.all(*allcuts)
         	
-            output['njet'].fill(dataset=dataset, region=region, cut = i+1, weight=weights.weight()[cut], njet=normalize(ak.num(events.Jet),cut))
-            output['nel'].fill(dataset=dataset, region=region,  cut=i+1, weight=weights.weight()[cut], nel=normalize(ak.num(events.Electron),cut))
-            output['nmu'].fill(dataset=dataset,   region=region,  cut=i+1, weight=weights.weight()[cut], nmu=normalize(ak.num(events.Muon),cut))
+            #output['njet'].fill(dataset=dataset, region=region, cut = i+1, weight=weights.weight()[cut], njet=normalize(ak.num(events.Jet),cut))
+            #output['nel'].fill(dataset=dataset, region=region,  cut=i+1, weight=weights.weight()[cut], nel=normalize(ak.num(events.Electron),cut))
+            #output['nmu'].fill(dataset=dataset,   region=region,  cut=i+1, weight=weights.weight()[cut], nmu=normalize(ak.num(events.Muon),cut))
         
-            output['lelpt'].fill(dataset=dataset, region=region,  cut=i+1, weight=weights.weight()[cut], lelpt=normalize(events.Electron[:, 0].pt,cut))
-            output['lmupt'].fill(dataset=dataset, region=region,  cut=i+1, weight=weights.weight()[cut], lmupt=normalize(events.Muon[:, 0].pt,cut))
-            output['ljpt'].fill(dataset=dataset,  region=region,  cut=i+1, weight=weights.weight()[cut], ljpt=normalize(events.Jet[:, 0].pt,cut))
-            output['sljpt'].fill(dataset=dataset, region=region,   cut=i+1, weight=weights.weight()[cut], sljpt=normalize(events.Jet[:, 1].pt,cut))
+            #output['lelpt'].fill(dataset=dataset, region=region,  cut=i+1, weight=weights.weight()[cut], lelpt=normalize(events.Electron[:, 0].pt,cut))
+            #output['lmupt'].fill(dataset=dataset, region=region,  cut=i+1, weight=weights.weight()[cut], lmupt=normalize(events.Muon[:, 0].pt,cut))
+            #output['ljpt'].fill(dataset=dataset,  region=region,  cut=i+1, weight=weights.weight()[cut], ljpt=normalize(events.Jet[:, 0].pt,cut))
+            #output['sljpt'].fill(dataset=dataset, region=region,   cut=i+1, weight=weights.weight()[cut], sljpt=normalize(events.Jet[:, 1].pt,cut))
         
         return output
         
