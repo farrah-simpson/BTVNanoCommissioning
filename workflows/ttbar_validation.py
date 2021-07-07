@@ -217,8 +217,8 @@ class NanoProcessor(processor.ProcessorABC):
         }
         #output['pt'].fill(dataset=dataset, pt=selev.Jet.pt.flatten())
         # Fill histograms dynamically  
-        #allcuts = set([])
-        #cut = selection.all(*allcuts)
+        allcuts = set([])
+        cut = selection.all(*allcuts)
         
         for histname, h in output.items():
             if (histname not in self.jet_hists) and (histname not in self.deepcsv_hists): continue
@@ -239,13 +239,6 @@ class NanoProcessor(processor.ProcessorABC):
             allcuts = set([])
             cut = selection.all(*allcuts)
         
-            for histname, h in output.items():
-                if (histname not in self.jet_hists) and (histname not in self.deepcsv_hists): continue
-                # Get valid fields perhistogram to fill
- 
-                fields = {k: ak.flatten(events.Jet[k], axis=None) for k in h.fields if k in dir(events.Jet)}
-                h.fill(dataset=dataset, region=region, cut=cut, weight=weights.weight()[cut], **fields)
- 
             output['njet'].fill(dataset=dataset, region=region, cut=cut, weight=weights.weight()[cut], njet=normalize(ak.num(events.Jet),cut))
             #output['nbjet_t'].fill(dataset=dataset, weight=weights.weight(), nbjet_t=flatten(ak.num(sbjets_t)))
             #output['nbjet_m'].fill(dataset=dataset, weight=weights.weight(), nbjet_m=flatten(ak.num(sbjets_m)))
